@@ -5,6 +5,8 @@ from kubernetes.client.rest import ApiException
 from . import auth
 from . import utils
 
+SERVICE_ROLE_BINDING = "./kubeflow_jupyter/common/yaml/servicerolebinding-ml-pipeline.yaml"
+ENVOY_FILTER = "./kubeflow_jupyter/common/yaml/envoyfilter-add-user-header.yaml"
 logger = utils.create_logger(__name__)
 
 try:
@@ -143,6 +145,12 @@ def list_namespaces():
         v1_core.list_namespace
     )
 
+@auth.needs_authorization("get", "", "v1", "namespaces")
+def read_namespace(namespace):
+    return wrap_resp(
+        "namespace",
+        v1_core.read_namespace,
+        namespace)
 
 # @auth.needs_authorization("list", "storage.k8s.io", "v1", "storageclasses")
 # NOTE: This function is only used from the backend in order to determine if a
@@ -192,6 +200,84 @@ def delete_notebook(notebook_name, namespace):
         client.V1DeleteOptions(propagation_policy="Foreground")
     )
 
+def get_userid(namespace):
+    # Get userid from metadata.annotations["owner"] of the namespace
+    if namespace is None:
+        return None
+    data = read_namespace(namespace)
+    logger.info(data["log"])
+    if data["success"]:
+        return data["namespace"].metadata.annotations.get("owner")
+
+    return None
+
+@auth.needs_authorization("create", "rbac.istio.io", "v1alpha1", "servicerolebindings")
+def create_servicerolebinding(notebook_name, kf_namespace, namespace):
+    # Create servicerolebinding for notebook server to access ml-pipeline
+    servicerolebinding = utils.load_param_yaml(SERVICE_ROLE_BINDING,
+                                                name=notebook_name,
+                                                kf_namespace=kf_namespace,
+                                                namespace=namespace)
+    return wrap(
+        custom_api.create_namespaced_custom_object,
+        "rbac.istio.io",
+        "v1alpha1",
+        kf_namespace,
+        "servicerolebindings",
+        servicerolebinding
+    )
+
+@auth.needs_authorization("delete", "rbac.istio.io", "v1alpha1", "servicerolebindings")
+def delete_servicerolebinding(notebook_name, kf_namespace, namespace):
+    return wrap(
+        custom_api.delete_namespaced_custom_object,
+        "rbac.istio.io",
+        "v1alpha1",
+        kf_namespace,
+        "servicerolebindings",
+        "bind-ml-pipeline-nb-{namespace}-{name}".format(
+            namespace=namespace,
+            name=notebook_name
+        ),
+        client.V1DeleteOptions(propagation_policy="Foreground")
+    )
+
+@auth.needs_authorization("create", "networking.istio.io", "v1alpha3", "envoyfilters")
+def create_envoy_filter(notebook_name, kf_namespace, namespace):
+    # Create envoyfilter to inject user_header for outgoing traffics
+    # from notebook server to ml-pipeline
+    user_id = get_userid(namespace)
+    if user_id is None:
+        return
+
+    envoyfilter = utils.load_param_yaml(ENVOY_FILTER,
+                                        name=notebook_name,
+                                        namespace=namespace,
+                                        kf_namespace=kf_namespace,
+                                        user_header=utils.get_user_header(),
+                                        user_prefix=utils.get_user_prefix(),
+                                        user_id=user_id)
+
+    return wrap(
+        custom_api.create_namespaced_custom_object,
+        "networking.istio.io",
+        "v1alpha3",
+        namespace,
+        "envoyfilters",
+        envoyfilter
+    )
+
+@auth.needs_authorization("delete", "networking.istio.io", "v1alpha3", "envoyfilters")
+def delete_envoy_filter(notebook_name, namespace):
+    return wrap(
+        custom_api.delete_namespaced_custom_object,
+        "networking.istio.io",
+        "v1alpha3",
+        namespace,
+        "envoyfilters",
+        "add-header-{name}".format(name=notebook_name),
+        client.V1DeleteOptions(propagation_policy="Foreground")
+    )
 
 # Readiness Probe helper
 def can_connect_to_k8s():

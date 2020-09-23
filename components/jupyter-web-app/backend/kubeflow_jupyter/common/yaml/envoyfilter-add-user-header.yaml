@@ -1,0 +1,26 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-{name}
+  namespace: {namespace}
+spec:
+  configPatches:
+  - applyTo: VIRTUAL_HOST
+    match:
+      context: SIDECAR_OUTBOUND
+      routeConfiguration:
+        vhost:
+          name: ml-pipeline.{kf_namespace}.svc.cluster.local:8888
+          route:
+            name: default
+    patch:
+      operation: MERGE
+      value:
+        request_headers_to_add:
+        - append: true
+          header:
+            key: {user_header}
+            value: {user_prefix}{user_id}
+  workloadSelector:
+    labels:
+      notebook-name: {name}

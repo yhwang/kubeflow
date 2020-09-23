@@ -162,6 +162,9 @@ def post_pvc(namespace):
 @app.route("/api/namespaces/<namespace>/notebooks/<notebook>",
            methods=["DELETE"])
 def delete_notebook(namespace, notebook):
+    # delete RBAC and envoy filter
+    api.delete_servicerolebinding(notebook, "kubeflow", namespace)
+    api.delete_envoy_filter(notebook, namespace)
     return jsonify(api.delete_notebook(notebook, namespace=namespace))
 
 

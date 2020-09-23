@@ -29,7 +29,6 @@ STATUS_WARNING = "warning"
 STATUS_RUNNING = "running"
 STATUS_WAITING = "waiting"
 
-
 # Logging
 def create_logger(name):
     handler = logging.StreamHandler(sys.stdout)
@@ -63,6 +62,11 @@ def get_username_from_request():
 
     return username
 
+def get_user_header():
+    return USER_HEADER
+
+def get_user_prefix():
+    return USER_PREFIX
 
 def load_param_yaml(f, **kwargs):
     c = None
@@ -619,3 +623,19 @@ def add_notebook_volume_secret(nb, secret, secret_name, mnt_path, mode):
         "name": secret,
     }
     container["volumeMounts"].append(mnt)
+
+def create_envoyfilter(notebook_name, kf_namespace, namespace):
+    # Create envoyfilter to inject user_header for outgoing traffics
+    # from notebook server to ml-pipeline
+    user_id = get_userid(namespace)
+    if user_id is None:
+        return
+
+    envoyfilter = load_param_yaml(ENVOY_FILTER,
+                                  name=notebook_name,
+                                  namespace=namespace,
+                                  kf_namespace=kf_namespace,
+                                  user_header=USER_HEADER,
+                                  user_prefix=USER_PREFIX,
+                                  user_id=user_id)
+    api.create_envoy_filter(envoyfilter, namespace)

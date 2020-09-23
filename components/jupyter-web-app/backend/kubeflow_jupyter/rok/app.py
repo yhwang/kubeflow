@@ -117,6 +117,10 @@ def post_notebook(namespace):
     # shm
     utils.set_notebook_shm(notebook, body, defaults)
 
+    # create RBAC and envoy filter to add header automatically
+    api.create_servicerolebinding(body["name"], "kubeflow", namespace)
+    api.create_envoyfilter(body["name"], "kubeflow", namespace)
+
     logger.info("Creating Notebook: {}".format(notebook))
     return jsonify(api.create_notebook(notebook, namespace=namespace))
 
